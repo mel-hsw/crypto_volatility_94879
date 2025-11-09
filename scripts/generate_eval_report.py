@@ -339,8 +339,10 @@ def generate_report(features_path: str, artifacts_dir: str, output_path: str):
             # Baseline model needs only volatility feature
             if model_name == 'baseline':
                 # Find volatility column (supports both naming conventions)
+                # Match the order from train.py: prefer log_return_std_60s, then fallback
                 volatility_col = None
-                for col_name in ['price_volatility_5min', 'return_std_300s']:
+                for col_name in ['log_return_std_60s', 'log_return_std_30s', 'log_return_std_300s', 
+                                 'return_std_60s', 'return_std_30s', 'price_volatility_5min', 'return_std_300s']:
                     if col_name in X_test.columns:
                         volatility_col = col_name
                         break
@@ -348,6 +350,7 @@ def generate_report(features_path: str, artifacts_dir: str, output_path: str):
                     X_model = X_test[[volatility_col]]
                 else:
                     print(f"Warning: Could not find volatility column for baseline model")
+                    print(f"  Available columns: {X_test.columns.tolist()}")
                     continue
             else:
                 X_model = X_test

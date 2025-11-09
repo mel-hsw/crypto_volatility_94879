@@ -89,11 +89,6 @@ The current model uses a reduced feature set to minimize multicollinearity:
 | `tick_count_60s` | Trading intensity (tick count) | 60s | int |
 | `return_range_60s` | Return range (max - min) | 60s | float |
 
-**Note:** Removed perfectly correlated features (r=1.0) to improve Logistic Regression performance:
-- Removed `return_std_30s`, `return_std_60s`, `return_std_300s` (duplicates of log_return_std_*)
-- Removed `log_return_mean_30s`, `log_return_mean_60s` (duplicates of return_mean_*)
-
-This reduction improved Logistic Regression PR-AUC by +6.6% (0.2298 → 0.2449).
 
 ### 3.3 Feature Engineering Rationale
 
@@ -103,11 +98,6 @@ This reduction improved Logistic Regression PR-AUC by +6.6% (0.2298 → 0.2449).
 2. **Return statistics** directly measure price movement patterns
 3. **Spread metrics** indicate market liquidity and stress
 4. **Tick intensity** proxies for trading activity and information flow
-
-**What we're NOT using (yet):**
-- Order book imbalance (complexity vs benefit trade-off)
-- Volume-weighted features (not available in ticker channel)
-- Cross-asset correlations (single-pair focus for MVP)
 
 ---
 
