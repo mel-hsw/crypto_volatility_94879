@@ -610,6 +610,480 @@ Need at least 100+ rows for meaningful drift analysis.
 
 ---
 
+# Milestone 3: Modeling, Tracking & Evaluation
+
+**Goal:** Train baseline and ML models, track experiments with MLflow, and generate comprehensive evaluation reports.
+
+---
+
+## 📋 Quick Start
+
+### Prerequisites
+- Milestones 1 & 2 completed
+- Features generated in `data/processed/features.parquet`
+- MLflow running at http://localhost:5001
+
+### Installation
+
+```bash
+# Install additional dependencies for Milestone 3
+pip install -r requirements.txt
+
+# Verify MLflow is accessible
+curl http://localhost:5001/health
+```
+
+---
+
+## 🎯 Milestone 3 Objectives
+
+✅ Train baseline model (z-score rule-based)  
+✅ Train ML model (Logistic Regression + optional XGBoost)  
+✅ Use time-based train/val/test splits  
+✅ Log experiments to MLflow  
+✅ Compute PR-AUC and F1@threshold metrics  
+✅ Generate model evaluation report (PDF)  
+✅ Create Model Card v1  
+✅ Generate Evidently drift report  
+✅ Verify inference speed (< 2x real-time)  
+
+---
+
+## 📂 New File Structure
+
+```
+models/
+├── baseline.py              # Baseline z-score detector
+├── train.py                 # Training pipeline for all models
+├── infer.py                 # Inference and benchmarking
+└── artifacts/               # Saved models and plots
+    ├── baseline/
+    │   ├── model.pkl
+    │   ├── pr_curve.png
+    │   └── roc_curve.png
+    ├── logistic_regression/
+    │   ├── model.pkl
+    │   ├── pr_curve.png
+    │   ├── roc_curve.png
+    │   └── feature_importance.png
+    └── xgboost/              # Optional
+        └── ...
+
+scripts/
+└── generate_eval_report.py  # PDF evaluation report generator
+
+reports/
+├── model_eval.pdf           # Comprehensive evaluation report
+└── evidently_drift.html     # Data drift report (refreshed)
+
+docs/
+├── model_card_v1.md         # Model documentation
+└── genai_appendix.md        # GenAI usage disclosure
+```
+
+---
+
+## 🚀 Step-by-Step Workflow
+
+### Step 1: Train All Models
+
+Train baseline and ML models with MLflow tracking:
+
+```bash
+python models/train.py \
+  --features data/processed/features.parquet \
+  --models baseline logistic xgboost \
+  --mlflow-uri http://localhost:5001
+```
+
+**What it does:**
+- Loads features and creates time-based train/val/test splits
+- Trains 3 models: baseline (z-score), logistic regression, XGBoost
+- Logs all experiments to MLflow with parameters and metrics
+- Saves models to `models/artifacts/`
+- Generates PR/ROC curves for each model
+
+**Expected output:**
+```
+Loading data...
+Data splits:
+  Train: 1500 samples (10.2% spikes)
+  Val:   300 samples (9.8% spikes)
+  Test:  300 samples (10.5% spikes)
+
+=== Training Baseline Model ===
+Validation PR-AUC: 0.7234
+Test PR-AUC: 0.7156
+
+=== Training Logistic Regression ===
+Validation PR-AUC: 0.7892
+Test PR-AUC: 0.7745
+
+=== Training XGBoost ===
+Validation PR-AUC: 0.8123
+Test PR-AUC: 0.7998
+
+=== Model Comparison (Test Set) ===
+Model                PR-AUC     F1         Precision  Recall    
+------------------------------------------------------------
+baseline             0.7156     0.6543     0.7012     0.6134    
+logistic             0.7745     0.7234     0.7456     0.7023    
+xgboost              0.7998     0.7543     0.7823     0.7289    
+
+All models logged to MLflow: http://localhost:5001
+```
+
+### Step 2: View MLflow Experiments
+
+```bash
+# MLflow should already be running from Milestone 1
+# If not, start it:
+cd docker && docker compose up -d mlflow
+
+# Access MLflow UI
+open http://localhost:5001
+```
+
+**In MLflow UI, verify:**
+- Experiment: "crypto-volatility-detection"
+- At least 2 runs (baseline + logistic, or all 3)
+- Metrics: `test_pr_auc`, `test_f1_score`, `test_precision`, `test_recall`
+- Artifacts: PR curves, ROC curves, saved models
+
+### Step 3: Run Inference Benchmark
+
+Verify inference meets <  2x real-time requirement (< 120 seconds for 60-second windows):
+
+```bash
+# Benchmark best model (e.g., logistic regression)
+python models/infer.py \
+  --model models/artifacts/logistic_regression/model.pkl \
+  --features data/processed/features.parquet \
+  --mode benchmark \
+  --n-samples 1000
+```
+
+**Expected output:**
+```
+=== Inference Benchmark ===
+Model: models/artifacts/logistic_regression/model.pkl
+Requirement: < 120 seconds for 60-second prediction window
+Testing with 1000 samples...
+
+Single prediction test:
+  Time: 0.23 ms
+  Prediction: 0 (prob: 0.124)
+
+Batch prediction test (1000 samples):
+  Total time: 0.187 seconds
+  Avg per sample: 0.19 ms
+  Throughput: 5347.6 predictions/second
+
+=== Real-Time Performance Check ===
+Prediction window: 60 seconds
+Maximum allowed inference time: 120 seconds
+Actual batch time: 0.187 seconds
+
+✓ PASSED: Inference is 641.7x faster than requirement
+
+Alert rate: 10.2% (102 / 1000)
+```
+
+### Step 4: Test Live Inference Simulation
+
+```bash
+python models/infer.py \
+  --model models/artifacts/logistic_regression/model.pkl \
+  --features data/processed/features.parquet \
+  --mode live
+```
+
+**Shows streaming predictions:**
+```
+=== Live Inference Simulation ===
+
+Streaming predictions (showing first 10):
+Timestamp                 Prediction   Probability  Alert    Time (ms) 
+--------------------------------------------------------------------------------
+2025-11-09 01:24:55       0            0.123          0.18      
+2025-11-09 01:24:56       0            0.089          0.15      
+2025-11-09 01:25:12       1            0.847        🚨  0.21      
+...
+```
+
+### Step 5: Generate Evaluation Report
+
+Create comprehensive PDF report:
+
+```bash
+python scripts/generate_eval_report.py \
+  --features data/processed/features.parquet \
+  --artifacts models/artifacts \
+  --output reports/model_eval.pdf
+```
+
+**Report includes:**
+- Model comparison table
+- PR/ROC curves comparison
+- Confusion matrices
+- Feature importance plots
+
+```bash
+# View report
+open reports/model_eval.pdf
+```
+
+### Step 6: Refresh Evidently Drift Report
+
+Generate updated drift report comparing train vs test distributions:
+
+```bash
+python scripts/generate_evidently_report.py \
+  --features data/processed/features.parquet \
+  --output reports/evidently_drift.html
+```
+
+```bash
+# View report
+open reports/evidently_drift.html
+```
+
+### Step 7: Complete Model Card
+
+Fill in the template with your actual results:
+
+```bash
+# Edit docs/model_card_v1.md
+# Replace placeholders like [INSERT VALUE] with actual numbers from MLflow and reports
+```
+
+**Key sections to complete:**
+- Training date and metrics
+- Test set performance (PR-AUC, F1, precision, recall)
+- Data statistics (samples, spike rate, time range)
+- Threshold value (τ)
+- Inference latency measurements
+
+### Step 8: Document GenAI Usage
+
+Update `docs/genai_appendix.md` with honest assessment of AI assistance used.
+
+---
+
+## 📊 Key Deliverables Checklist
+
+### Code Files
+- [x] `models/baseline.py` - Baseline z-score detector
+- [x] `models/train.py` - Training pipeline
+- [x] `models/infer.py` - Inference module
+- [x] `scripts/generate_eval_report.py` - Report generator
+
+### Trained Models
+- [x] `models/artifacts/baseline/model.pkl`
+- [x] `models/artifacts/logistic_regression/model.pkl`
+- [x] `models/artifacts/xgboost/model.pkl` (optional)
+
+### Reports & Documentation
+- [x] `reports/model_eval.pdf` - Performance evaluation
+- [x] `reports/evidently_drift.html` - Data drift analysis
+- [x] `docs/model_card_v1.md` - Model documentation
+- [x] `docs/genai_appendix.md` - AI usage disclosure
+
+### MLflow Tracking
+- [x] At least 2 logged runs (baseline + ML)
+- [x] Metrics: PR-AUC, F1, Precision, Recall
+- [x] Artifacts: Plots and models
+
+---
+
+## 🧪 Testing & Validation
+
+### Verify MLflow Logging
+
+```bash
+# Check runs exist
+mlflow experiments list
+mlflow runs list --experiment-id 0
+
+# Or use Python
+python -c "
+import mlflow
+mlflow.set_tracking_uri('http://localhost:5001')
+client = mlflow.tracking.MlflowClient()
+runs = client.search_runs(experiment_ids=['0'])
+print(f'Found {len(runs)} runs')
+for run in runs:
+    print(f\"  {run.info.run_name}: PR-AUC = {run.data.metrics.get('test_pr_auc', 'N/A')}\")
+"
+```
+
+### Verify Inference Performance
+
+**Requirements:**
+- Single prediction: < 10ms (recommended)
+- Batch 1000 samples: < 1 second (recommended)
+- Overall: < 2x real-time (< 120 seconds for 60-second windows) **REQUIRED**
+
+```bash
+# Quick test
+python models/infer.py \
+  --model models/artifacts/logistic_regression/model.pkl \
+  --features data/processed/features.parquet \
+  --mode benchmark \
+  --n-samples 100
+```
+
+### Verify Report Quality
+
+**Model evaluation PDF should include:**
+- ✓ Title page with date
+- ✓ Metrics comparison table with PR-AUC highlighted
+- ✓ PR curves for all models
+- ✓ ROC curves for all models
+- ✓ Confusion matrices
+- ✓ Feature importance (for applicable models)
+
+---
+
+## 📈 Expected Results
+
+### Performance Targets
+
+| Metric | Baseline Target | ML Target | Stretch Goal |
+|--------|----------------|-----------|--------------|
+| PR-AUC | ≥ 0.60 | ≥ 0.70 | ≥ 0.80 |
+| F1-Score | ≥ 0.50 | ≥ 0.65 | ≥ 0.75 |
+| Inference Time | < 120s | < 10s | < 1s |
+
+### Typical Results
+
+Based on 2,000-5,000 feature samples with ~10% spike rate:
+
+**Baseline (Z-Score):**
+- PR-AUC: 0.65-0.72
+- F1-Score: 0.55-0.65
+- Simple, fast, interpretable
+
+**Logistic Regression:**
+- PR-AUC: 0.72-0.80
+- F1-Score: 0.65-0.75
+- Good balance of performance and speed
+
+**XGBoost:**
+- PR-AUC: 0.75-0.82
+- F1-Score: 0.70-0.78
+- Best performance, slightly slower
+
+---
+
+## 🐛 Troubleshooting
+
+### MLflow Connection Issues
+
+```bash
+# Check if MLflow is running
+docker ps | grep mlflow
+
+# Restart if needed
+cd docker && docker compose restart mlflow
+
+# Test connection
+curl http://localhost:5001/health
+```
+
+### Model Training Fails
+
+**Issue:** "Not enough data" or "No positive samples"
+
+**Solution:**
+```bash
+# Check feature data
+python -c "
+import pandas as pd
+df = pd.read_parquet('data/processed/features.parquet')
+print(f'Total samples: {len(df)}')
+print(f'Spike rate: {df[\"volatility_spike\"].mean():.2%}')
+print(f'Missing values: {df.isnull().sum().sum()}')
+"
+
+# Need at least 500+ samples with 5-15% spike rate
+```
+
+### Inference Benchmark Fails
+
+**Issue:** "KeyError: 'price_volatility_5min'"
+
+**Solution:** Baseline model only needs volatility feature, handled automatically in code. Check that features.parquet has all required columns.
+
+### PDF Report Generation Fails
+
+**Issue:** Missing matplotlib backend
+
+**Solution:**
+```bash
+pip install matplotlib --upgrade
+# or
+pip install reportlab
+```
+
+---
+
+## 🎓 Learning Outcomes
+
+After completing Milestone 3, you should understand:
+
+1. **Model Training Workflows**
+   - Time-based train/val/test splits
+   - Handling class imbalance
+   - Hyperparameter selection
+
+2. **Experiment Tracking**
+   - Logging parameters, metrics, artifacts to MLflow
+   - Comparing multiple model runs
+   - Model versioning
+
+3. **Model Evaluation**
+   - PR-AUC vs ROC-AUC for imbalanced data
+   - Precision-recall tradeoffs
+   - Confusion matrix interpretation
+
+4. **Production Considerations**
+   - Inference latency requirements
+   - Real-time performance validation
+   - Model documentation (Model Cards)
+
+5. **Monitoring & Drift**
+   - Data distribution shifts
+   - Model performance degradation
+   - Retraining triggers
+
+---
+
+## 📚 Next Steps (Post-Milestone 3)
+
+- **Deployment:** Containerize inference service
+- **API:** Build REST API for real-time predictions
+- **Monitoring Dashboard:** Visualize live predictions and alerts
+- **Automated Retraining:** Schedule weekly model updates
+- **A/B Testing:** Compare model versions in production
+- **Alert System:** Send notifications when spikes detected
+
+---
+
+## 📞 Support
+
+**Common Issues:**
+1. MLflow not accessible → Check Docker containers
+2. Models not training → Verify feature data exists
+3. Inference too slow → Use simpler model or optimize features
+4. Poor PR-AUC → Adjust threshold, add features, or collect more data
+
+**Resources:**
+- MLflow Docs: https://mlflow.org/docs/latest/index.html
+- Evidently Docs: https://docs.evidentlyai.com/
+- Model Cards Paper: https://arxiv.org/abs/1810.03993
+
+
 ## 📞 Support
 
 For issues or questions:
