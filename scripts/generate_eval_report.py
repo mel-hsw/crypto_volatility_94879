@@ -231,10 +231,11 @@ def create_feature_importance_page(pdf, models_dict: dict, X_test=None):
     for model_name, data in models_dict.items():
         model = data['model']
         
-        # Create subplot at correct position
-        ax = fig.add_subplot(rows, cols, idx + 1)
-        
+        # Only create subplot if model has feature importance attributes
         if hasattr(model, 'coef_'):
+            # Create subplot at correct position
+            ax = fig.add_subplot(rows, cols, idx + 1)
+            
             # Logistic Regression - use actual feature names
             importance = model.coef_[0]
             # Get feature names from the model's training data if available
@@ -259,6 +260,9 @@ def create_feature_importance_page(pdf, models_dict: dict, X_test=None):
             idx += 1
             
         elif hasattr(model, 'feature_importances_'):
+            # Create subplot at correct position
+            ax = fig.add_subplot(rows, cols, idx + 1)
+            
             # XGBoost - use actual feature names from model
             importance = model.feature_importances_
             # Get feature names from the model's training data if available
@@ -297,12 +301,13 @@ def generate_report(features_path: str, artifacts_dir: str, output_path: str):
     """Generate comprehensive evaluation report."""
     print(f"Generating evaluation report...")
     
-    # Import prepare_features from train.py
+    # Import prepare_features from train.py and BaselineVolatilityDetector
     import sys
     models_dir = Path(__file__).parent.parent / "models"
     if str(models_dir) not in sys.path:
         sys.path.insert(0, str(models_dir))
     from train import prepare_features
+    from baseline import BaselineVolatilityDetector
     
     features_path = Path(features_path)
     artifacts_dir = Path(artifacts_dir)
@@ -336,22 +341,24 @@ def generate_report(features_path: str, artifacts_dir: str, output_path: str):
         
         # Make predictions
         if hasattr(model, 'predict'):
-            # Baseline model needs only volatility feature
+            # Baseline model needs multiple features (composite z-score)
             if model_name == 'baseline':
-                # Find volatility column (supports both naming conventions)
-                # Match the order from train.py: prefer log_return_std_60s, then fallback
-                volatility_col = None
-                for col_name in ['log_return_std_60s', 'log_return_std_30s', 'log_return_std_300s', 
-                                 'return_std_60s', 'return_std_30s', 'price_volatility_5min', 'return_std_300s']:
-                    if col_name in X_test.columns:
-                        volatility_col = col_name
-                        break
-                if volatility_col:
-                    X_model = X_test[[volatility_col]]
-                else:
-                    print(f"Warning: Could not find volatility column for baseline model")
-                    print(f"  Available columns: {X_test.columns.tolist()}")
+                # Use the same feature selection logic as train.py
+                baseline_features = BaselineVolatilityDetector.DEFAULT_FEATURES
+                available_features = [f for f in baseline_features if f in X_test.columns]
+                
+                if not available_features:
+                    print(f"Warning: None of the required baseline features found.")
+                    print(f"  Expected: {baseline_features}")
+                    print(f"  Available: {X_test.columns.tolist()}")
                     continue
+                
+                if len(available_features) < len(baseline_features):
+                    missing = set(baseline_features) - set(available_features)
+                    print(f"⚠ Warning: Some baseline features missing: {missing}")
+                    print(f"   Using {len(available_features)} available features: {available_features}")
+                
+                X_model = X_test[available_features].copy()
             else:
                 X_model = X_test
             

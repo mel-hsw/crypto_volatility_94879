@@ -492,7 +492,6 @@ class FeaturePipeline:
         
         # Compute forward-looking volatility (60-second horizon) within each chunk
         HORIZON_SECONDS = 60
-        df['price_pct_change'] = df['price'].pct_change()
         
         # Initialize future_volatility column
         df['future_volatility'] = np.nan
@@ -508,25 +507,35 @@ class FeaturePipeline:
                 logger.debug(f"Chunk {chunk_id} has < 2 rows, skipping")
                 continue
             
-            # Estimate number of ticks in 60 seconds for this chunk
-            chunk_time_diff = (chunk_df['timestamp'].max() - chunk_df['timestamp'].min()).total_seconds()
-            if chunk_time_diff <= 0:
-                logger.debug(f"Chunk {chunk_id} has invalid time range, skipping")
-                continue
+            # Compute forward-looking volatility (60-second horizon) for each row
+            # For each timestamp t, find all ticks in the next 60 seconds and compute std of returns
+            chunk_df = chunk_df.sort_values('timestamp').reset_index(drop=True)
+            chunk_df['future_volatility'] = np.nan
+            
+            for idx in range(len(chunk_df)):
+                current_time = chunk_df.loc[idx, 'timestamp']
+                future_time_limit = current_time + pd.Timedelta(seconds=HORIZON_SECONDS)
                 
-            ticks_per_second = len(chunk_df) / chunk_time_diff
-            window_size = max(1, int(ticks_per_second * HORIZON_SECONDS))
+                # Find all ticks in the future 60-second window
+                future_mask = (
+                    (chunk_df['timestamp'] > current_time) & 
+                    (chunk_df['timestamp'] <= future_time_limit)
+                )
+                future_ticks = chunk_df[future_mask]
+                
+                if len(future_ticks) < 2:
+                    # Need at least 2 ticks to compute volatility
+                    continue
+                
+                # Compute returns (price changes) between consecutive ticks in future window
+                future_prices = future_ticks['price'].values
+                future_returns = np.diff(future_prices) / future_prices[:-1]  # (p_t+1 - p_t) / p_t
+                
+                # Compute standard deviation of future returns
+                if len(future_returns) > 0:
+                    chunk_df.loc[idx, 'future_volatility'] = np.std(future_returns)
             
-            logger.debug(f"Chunk {chunk_id}: {len(chunk_df)} rows, {ticks_per_second:.2f} ticks/sec, "
-                        f"window_size={window_size} ticks")
-            
-            # Compute forward-looking volatility within this chunk only
-            chunk_df['future_volatility'] = (
-                chunk_df['price_pct_change']
-                .shift(-window_size)
-                .rolling(window=window_size, min_periods=1)
-                .std()
-            )
+            logger.debug(f"Chunk {chunk_id}: Computed future volatility for {chunk_df['future_volatility'].notna().sum()} rows")
             
             # Update the main dataframe with this chunk's volatility values
             df.loc[chunk_mask, 'future_volatility'] = chunk_df['future_volatility'].values
@@ -564,7 +573,7 @@ class FeaturePipeline:
                    f"Spike (1): {label_counts.get(1, 0)} ({label_counts.get(1, 0)/len(df_clean)*100:.1f}%)")
         
         # Drop temporary columns
-        df_clean = df_clean.drop(columns=['price_pct_change', 'future_volatility', 'time_diff', 'chunk_id'], 
+        df_clean = df_clean.drop(columns=['future_volatility', 'time_diff', 'chunk_id'], 
                                  errors='ignore')
         
         return df_clean

@@ -3,7 +3,7 @@
 **Project:** Crypto Volatility Detection  
 **Student:** Melissa Wong  
 **Course:** Operationalize AI  
-**Date:** [INSERT DATE]
+**Date:** November 13, 2025
 
 ---
 
@@ -160,11 +160,73 @@ This document transparently discloses all uses of Generative AI tools (such as C
 **Used in:** `scripts/generate_eval_report.py` (table generation)  
 **Verification:** Added color coding for best scores
 
+**Prompt:** "Fix baseline model feature selection to use composite z-score with 8 features instead of single volatility column"  
+**Used in:** `scripts/generate_eval_report.py` (baseline model handling)  
+**Verification:** Updated to match train.py logic, tested with latest models
+
+**Prompt:** "Fix feature importance page subplot creation bug"  
+**Used in:** `scripts/generate_eval_report.py` (create_feature_importance_page)  
+**Verification:** Fixed subplot indexing issue, tested with all model types
+
 #### Model Card (`docs/model_card_v1.md`)
 
 **Prompt:** "Provide Model Card template following Mitchell et al. (2019) format"  
 **Used in:** `docs/model_card_v1.md` (template structure)  
 **Verification:** I filled in all model-specific details including actual performance metrics from MLflow, limitations based on testing, ethical considerations, and maintenance plan
+
+**Prompt:** "Update model card with latest performance metrics and stratified splitting results"  
+**Used in:** `docs/model_card_v1.md` (v1.1 updates)  
+**Verification:** Updated with XGBoost stratified results (PR-AUC 0.7815), added comparison tables for both split methods
+
+---
+
+### Milestone 3 Extensions: Model Improvements & Refinements
+
+#### Chunk-Aware Label Creation (`features/featurizer.py`)
+
+**Prompt:** "Fix future volatility calculation to be chunk-aware and correctly forward-looking, preventing calculations across data gaps"  
+**Used in:** `features/featurizer.py` (_add_labels_to_dataframe method)  
+**Verification:** Implemented iterative calculation within chunks, tested with multiple data gaps, verified no look-ahead bias
+
+**Prompt:** "Update label creation to use chunk boundaries defined by gaps >300s"  
+**Used in:** `features/featurizer.py` (chunk detection logic)  
+**Verification:** Tested with various gap sizes, verified labels respect chunk boundaries
+
+#### Stratified Splitting (`models/train_stratified.py`)
+
+**Prompt:** "Create stratified train/test split script that balances spike rates across splits while maintaining temporal order"  
+**Used in:** `models/train_stratified.py`  
+**Verification:** Implemented block-based approach with greedy assignment, tested spike rate balance, verified temporal order maintained
+
+**Prompt:** "Add shuffle option for perfect spike rate balance (breaks temporal order)"  
+**Used in:** `models/train_stratified.py` (load_and_split_data_stratified)  
+**Verification:** Added sklearn StratifiedShuffleSplit option, tested spike rate balance (10% across all splits)
+
+#### Baseline Model Updates (`models/baseline.py`, `models/train.py`)
+
+**Prompt:** "Update baseline model to use composite z-score across 8 features instead of single volatility column"  
+**Used in:** `models/train.py` (train_baseline function)  
+**Verification:** Updated to use DEFAULT_FEATURES, tested with all 8 features, verified improved performance
+
+**Prompt:** "Fix baseline model feature validation to handle missing features gracefully"  
+**Used in:** `models/baseline.py` (_validate_features_present)  
+**Verification:** Added clear error messages, tested with various feature combinations
+
+#### Feature Specification Updates (`docs/feature_spec.md`)
+
+**Prompt:** "Update feature spec with chunk-aware volatility calculation and latest model performance"  
+**Used in:** `docs/feature_spec.md` (v1.1 updates)  
+**Verification:** Documented forward-looking volatility implementation, added stratified splitting impact, updated performance metrics
+
+#### Documentation Updates (README.md, handoff/README.md)
+
+**Prompt:** "Update README with latest model performance and stratified splitting information"  
+**Used in:** `README.md` (performance results section)  
+**Verification:** Added comparison tables for both split methods, updated best model recommendation
+
+**Prompt:** "Create handoff package README with exact integration steps and model selection rationale"  
+**Used in:** `handoff/README.md`  
+**Verification:** Documented Selected-base decision, added step-by-step integration guide, verified all required files listed
 
 ---
 
@@ -176,6 +238,10 @@ This document transparently discloses all uses of Generative AI tools (such as C
 2. **Evidently Framework:** Data drift monitoring and reporting techniques
 3. **Streaming Architecture:** Best practices for Kafka consumer/producer patterns
 4. **Model Evaluation:** Comprehensive metrics beyond accuracy for imbalanced datasets
+5. **Stratified Splitting:** Balancing class distributions across train/val/test splits
+6. **Chunk-Aware Processing:** Handling data gaps in time-series feature engineering
+7. **Forward-Looking Labels:** Correct implementation of future volatility calculation
+8. **Composite Scoring:** Multi-feature z-score aggregation for baseline models
 
 ### What I Implemented Independently
 
@@ -184,6 +250,11 @@ This document transparently discloses all uses of Generative AI tools (such as C
 3. **Model Selection:** Choosing appropriate algorithms based on requirements
 4. **Performance Analysis:** Interpreting results and identifying limitations
 5. **System Architecture:** Designing end-to-end pipeline flow
+6. **Chunk Detection Logic:** Identifying data collection gaps and defining boundaries
+7. **Stratified Split Algorithm:** Designing block-based approach to balance spike rates
+8. **Future Volatility Fix:** Correcting forward-looking calculation to avoid look-ahead bias
+9. **Model Comparison:** Analyzing impact of stratified vs time-based splits
+10. **Handoff Package:** Organizing deliverables for team integration
 
 ### Critical Thinking Applied
 
@@ -192,6 +263,11 @@ This document transparently discloses all uses of Generative AI tools (such as C
 3. **Time-Based Splits:** Avoided data leakage with temporal train/val/test splits
 4. **Real-Time Requirements:** Defined and validated < 2x real-time constraint
 5. **Ethical Considerations:** Identified risks and mitigation strategies independently
+6. **Chunk-Aware Processing:** Identified issue with volatility calculation across data gaps, implemented chunk boundaries
+7. **Stratified Splitting:** Recognized temporal clustering causing train/test imbalance, implemented balanced splits
+8. **Future Volatility Fix:** Identified incorrect forward-looking calculation, corrected to iterative chunk-aware method
+9. **Model Selection:** Analyzed trade-offs between precision and recall, selected XGBoost stratified for best overall performance
+10. **Baseline Improvement:** Recognized single-feature limitation, implemented composite z-score across 8 features
 
 ---
 
@@ -216,6 +292,18 @@ For all AI-generated code, I performed the following checks:
 - ✓ Validated PR-AUC calculation matches sklearn documentation
 - ✓ Ensured reproducibility with random seeds
 
+**Script:** `features/featurizer.py` (label creation)
+- ✓ Verified chunk-aware volatility calculation respects data gaps
+- ✓ Tested forward-looking calculation with various gap sizes
+- ✓ Confirmed no look-ahead bias in future volatility computation
+- ✓ Validated threshold calculation uses all chunks appropriately
+
+**Script:** `models/train_stratified.py`
+- ✓ Verified stratified split balances spike rates across train/val/test
+- ✓ Confirmed temporal order maintained in block-based approach
+- ✓ Tested with shuffle option for perfect balance
+- ✓ Validated improved model performance with balanced splits
+
 ---
 
 ## Honest Assessment
@@ -232,6 +320,11 @@ For all AI-generated code, I performed the following checks:
 - Performance optimization (inference speed, memory usage)
 - Interpretation of results and business implications
 - Ethical considerations and risk assessment
+- Identifying and fixing future volatility calculation bug (chunk-aware implementation)
+- Designing stratified splitting algorithm to balance spike rates
+- Analyzing impact of temporal clustering on model performance
+- Selecting best model based on use case requirements (precision vs recall trade-offs)
+- Creating comprehensive handoff package for team integration
 
 ### Skills Developed
 - Understanding when to trust vs. verify AI suggestions
@@ -253,7 +346,7 @@ I confirm that:
 5. The project demonstrates my learning and understanding of the material
 
 **Signature:** Melissa Wong  
-**Date:** [INSERT DATE]
+**Date:** November 13, 2025
 
 ---
 

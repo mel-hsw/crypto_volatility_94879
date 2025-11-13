@@ -10,13 +10,12 @@ import pandas as pd
 from pathlib import Path
 from datetime import timedelta
 
-from evidently import Report
+from evidently.report import Report
 from evidently.metrics import (
-    ValueDrift,
-    DriftedColumnsCount,
-    DatasetMissingValueCount,
-    ColumnCount,
-    RowCount,
+    DatasetDriftMetric,
+    ColumnDriftMetric,
+    DatasetMissingValuesMetric,
+    DatasetSummaryMetric,
 )
 
 import logging
@@ -141,9 +140,8 @@ def select_features_for_drift(df: pd.DataFrame) -> list:
     available_cols = [col for col in priority_features if col in df.columns]
     
     # Create derived feature: return range (return_max - return_min)
+    # Note: This is computed on-the-fly for both reference and current datasets in generate_report
     if 'return_max_60s' in df.columns and 'return_min_60s' in df.columns:
-        df = df.copy()
-        df['return_range_60s'] = df['return_max_60s'] - df['return_min_60s']
         if 'return_range_60s' not in available_cols:
             available_cols.append('return_range_60s')
     
@@ -178,11 +176,20 @@ def generate_report(reference_df: pd.DataFrame,
     # Select only the features used in training/inference
     feature_cols = select_features_for_drift(reference_df)
     
+    # Compute derived features if needed (e.g., return_range_60s)
+    reference_df = reference_df.copy()
+    current_df = current_df.copy()
+    if 'return_range_60s' in feature_cols:
+        if 'return_max_60s' in reference_df.columns and 'return_min_60s' in reference_df.columns:
+            reference_df['return_range_60s'] = reference_df['return_max_60s'] - reference_df['return_min_60s']
+        if 'return_max_60s' in current_df.columns and 'return_min_60s' in current_df.columns:
+            current_df['return_range_60s'] = current_df['return_max_60s'] - current_df['return_min_60s']
+    
     # Ensure both datasets have the same columns
-    common_cols = [col for col in feature_cols if col in current_df.columns]
+    common_cols = [col for col in feature_cols if col in reference_df.columns and col in current_df.columns]
     if len(common_cols) != len(feature_cols):
         missing = set(feature_cols) - set(common_cols)
-        logger.warning(f"Some features missing in current dataset: {missing}")
+        logger.warning(f"Some features missing in datasets: {missing}")
     
     # Filter to only include relevant feature columns (plus timestamp for context)
     cols_to_include = common_cols.copy()
@@ -195,27 +202,26 @@ def generate_report(reference_df: pd.DataFrame,
     logger.info(f"Analyzing {len(common_cols)} feature columns: {common_cols}")
     
     # Create report with data quality and drift analysis
-    # ValueDrift requires one metric per column, so create metrics for each feature
-    drift_metrics = [ValueDrift(column=col) for col in common_cols]
+    # ColumnDriftMetric requires one metric per column, so create metrics for each feature
+    drift_metrics = [ColumnDriftMetric(column_name=col) for col in common_cols]
     
     report = Report(metrics=[
-        DatasetMissingValueCount(),
-        ColumnCount(),
-        RowCount(),
-        DriftedColumnsCount(),
-        *drift_metrics,  # Unpack list of ValueDrift metrics
+        DatasetSummaryMetric(),
+        DatasetMissingValuesMetric(),
+        DatasetDriftMetric(),
+        *drift_metrics,  # Unpack list of ColumnDriftMetric metrics
     ])
     
-    # Run report on filtered data
-    snapshot = report.run(reference_data=reference_filtered, current_data=current_filtered)
+    # Run report on filtered data (modifies report in place)
+    report.run(reference_data=reference_filtered, current_data=current_filtered)
     
     # Save as HTML
-    snapshot.save_html(output_path)
+    report.save_html(output_path)
     logger.info(f"✓ Report saved to {output_path}")
     
     # Also save as JSON for programmatic access
     json_path = output_path.replace('.html', '.json')
-    snapshot.save_json(json_path)
+    report.save_json(json_path)
     logger.info(f"✓ JSON report saved to {json_path}")
     
     return report

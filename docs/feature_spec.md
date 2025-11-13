@@ -2,8 +2,9 @@
 
 ## Project: Real-Time Crypto Volatility Detection
 
-**Date:** November 9, 2025  
-**Author:** Melissa Wong
+**Date:** November 13, 2025  
+**Author:** Melissa Wong  
+**Version:** 1.1
 
 ---
 
@@ -23,13 +24,24 @@
 ### Volatility Proxy
 **Rolling standard deviation of midprice returns** over the future 60-second window.
 
+**Implementation:** Chunk-aware forward-looking calculation that respects data collection gaps.
+
 Mathematically:
 ```
 σ_future = std(r_t+1, r_t+2, ..., r_t+n)
 where:
   r_i = (price_i - price_{i-1}) / price_{i-1}
-  n = number of ticks in 60 seconds
+  n = number of ticks in [t, t+60 seconds]
+  
+Constraint: Only ticks within the same data collection chunk are considered
+(no calculation across gaps > gap_threshold_seconds)
 ```
+
+**Key Changes (v1.1):**
+- **Chunk-aware calculation:** Volatility computed only within continuous data segments
+- **Forward-looking:** For each timestamp, finds all ticks in the next 60 seconds and computes std of returns
+- **Gap handling:** Data collection gaps (>300s default) define chunk boundaries
+- **Iterative method:** Correctly handles variable tick density and ensures no look-ahead bias
 
 ### Label Definition
 Binary classification:
@@ -39,18 +51,23 @@ label = 0  if σ_future < τ   (normal conditions)
 ```
 
 ### Chosen Threshold (τ)
-**Value:** `0.000026` (from EDA analysis, 90th percentile)
+**Value:** 90th percentile (configurable, default: 90)
 
 **Justification:**
-- Selected at the **90th percentile** of observed future volatility
+- Selected at the **90th percentile** of observed future volatility within each data chunk
 - Based on percentile analysis in EDA (see `notebooks/eda.ipynb`)
 - This threshold captures the top 10% of volatile periods
-- Results in exactly **10.0%** positive class (spikes) - 5,251 out of 52,524 samples
+- **Chunk-aware:** Threshold calculated separately for each data collection chunk to account for temporal variations
+- Results in approximately **10.0%** positive class (spikes) when data is balanced
 
 **Trade-offs:**
 - Higher threshold → fewer false positives, but might miss moderate spikes
 - Lower threshold → more sensitivity, but higher false alarm rate
 - Current threshold balances detection rate with actionable signal quality
+
+**Configuration:**
+- Default: `label_threshold_percentile=90` (configurable in `featurizer.py`)
+- Gap threshold: `label_gap_threshold_seconds=300` (5 minutes) defines chunk boundaries
 
 ---
 
@@ -129,6 +146,29 @@ The current model uses a reduced feature set to minimize multicollinearity. Feat
 
 This reduction improved Logistic Regression PR-AUC by +6.6% (0.2298 → 0.2449).
 
+#### Baseline Model Features (8 features)
+
+The baseline model uses a composite z-score approach across 8 features (matching `BaselineVolatilityDetector.DEFAULT_FEATURES`):
+
+| Feature Name | Description | Window | Usage |
+|--------------|-------------|--------|-------|
+| `log_return_std_30s` | 30-second log return volatility | 30s | Composite z-score |
+| `log_return_std_60s` | 60-second log return volatility | 60s | Composite z-score |
+| `log_return_std_300s` | 300-second log return volatility | 300s | Composite z-score |
+| `return_mean_60s` | 1-minute return mean | 60s | Composite z-score |
+| `return_mean_300s` | 5-minute return mean | 300s | Composite z-score |
+| `return_min_30s` | Minimum return in 30s | 30s | Composite z-score |
+| `spread_std_300s` | 300-second spread volatility | 300s | Composite z-score |
+| `spread_mean_60s` | 60-second spread mean | 60s | Composite z-score |
+| `tick_count_60s` | Trading intensity | 60s | Composite z-score |
+
+**Baseline Method:**
+1. Standardize each feature using training mean/std
+2. Compute per-feature z-scores
+3. Calculate composite score as mean of z-scores
+4. Apply threshold (default: 2.0) to composite z-score
+5. Predict spike if composite z-score >= threshold
+
 ### 3.3 Feature Engineering Rationale
 
 **Why these features?**
@@ -137,11 +177,17 @@ This reduction improved Logistic Regression PR-AUC by +6.6% (0.2298 → 0.2449).
 2. **Return statistics** directly measure price movement patterns
 3. **Spread metrics** indicate market liquidity and stress
 4. **Tick intensity** proxies for trading activity and information flow
+5. **Log returns** preferred over simple returns for crypto (more stable, symmetric)
 
 **What we're NOT using (yet):**
 - Order book imbalance (complexity vs benefit trade-off)
 - Volume-weighted features (not available in ticker channel)
 - Cross-asset correlations (single-pair focus for MVP)
+
+**Performance Impact:**
+- **XGBoost (Stratified):** PR-AUC 0.7815 with 10-feature set
+- **Feature reduction:** Removing perfectly correlated features improved Logistic Regression PR-AUC by +6.6%
+- **Stratified splitting:** Balancing spike rates across splits improved XGBoost PR-AUC from 0.7359 to 0.7815
 
 ---
 
@@ -179,10 +225,15 @@ Coinbase WebSocket → Kafka (ticks.raw) → Featurizer → Kafka (ticks.feature
 
 ### 5.2 Replay Pipeline (for reproducibility)
 ```
-NDJSON files → replay.py → FeatureComputer → Parquet
+NDJSON files → replay.py → FeatureComputer → FeaturePipeline._add_labels_to_dataframe → Parquet
 ```
 
 **Validation:** Replay and live features must match exactly (verified via `scripts/replay.py`)
+
+**Label Creation:**
+- Labels (`volatility_spike`) are created using `FeaturePipeline._add_labels_to_dataframe`
+- Chunk-aware calculation ensures labels respect data collection gaps
+- Can be added during feature generation (`--add-labels` flag) or separately via `scripts/add_labels.py`
 
 ---
 
@@ -209,15 +260,23 @@ NDJSON files → replay.py → FeatureComputer → Parquet
 - Large gaps (>10s) logged as warnings
 - Gaps are natural in crypto markets (24/7 trading but brief pauses)
 
+**Chunk Detection (v1.1):**
+- Data collection gaps (>300s default) define chunk boundaries
+- Chunks are detected automatically during label creation
+- Volatility calculation respects chunk boundaries (no calculation across gaps)
+- Prevents artificial volatility spikes from connecting unrelated data segments
+
 **Current Strategy:**
 - No forward-fill implemented (gaps preserved in features)
 - Windowed features naturally handle gaps (fewer ticks = lower tick_count)
+- Chunk-aware label creation ensures forward-looking volatility only uses ticks within same chunk
 - Future enhancement: Forward-fill short gaps (<10s) with last known price
 
 **Gap Tolerance:**
 - Windows with >10% missing ticks may have reduced signal quality
 - Documented in feature statistics but not filtered
 - Model learns to handle variable tick density
+- Chunk boundaries prevent cross-gap calculations that could introduce bias
 
 ### 5.3 Data Quality Checks
 
@@ -255,40 +314,93 @@ NDJSON files → replay.py → FeatureComputer → Parquet
 
 | Metric | Value |
 |--------|-------|
-| Total samples | 52,524 |
+| Total samples | ~9,629 (after filtering) |
 | Time range | 2025-11-08 15:12:31 to 2025-11-09 01:25:17 (~10.2 hours) |
-| Positive class % | 10.00% |
+| Positive class % | ~10.00% (varies by split method) |
 | Missing data % | 0.01% |
 | Avg ticks/second | 1.43 |
+| Data chunks | Multiple (gaps >300s define boundaries) |
+
+**Data Split Statistics:**
+
+**Time-Based Split:**
+- Training: ~6,740 samples (6.60% spike rate)
+- Validation: ~1,444 samples (2.42% spike rate)
+- Test: ~1,445 samples (33.43% spike rate)
+- *Note: Temporal clustering causes test set to have much higher spike rate*
+
+**Stratified Split (Recommended):**
+- Training: ~6,740 samples (10.0% spike rate)
+- Validation: ~1,444 samples (10.0% spike rate)
+- Test: ~1,445 samples (10.0% spike rate)
+- *Note: Balanced spike rates improve model performance*
 
 **Feature Statistics (mean, std):**
-- `return_mean_60s`: mean=-0.000000, std=0.000002
-- `return_mean_300s`: mean=-0.000000, std=0.000001
-- `return_std_300s`: mean=0.000040, std=0.000013
-- `spread`: mean=0.271610, std=0.948744
-- `spread_bps`: mean=0.026680, std=0.093189
+- `return_mean_60s`: mean≈0.0, std≈0.000002
+- `return_mean_300s`: mean≈0.0, std≈0.000001
+- `log_return_std_60s`: Best separation (0.569 std dev between classes)
+- `spread`: mean≈0.27, std≈0.95
+- `spread_bps`: mean≈0.027, std≈0.093
 
 ---
 
-## 7. Next Steps (Milestone 3)
+## 7. Model Performance with These Features
 
-1. **Train models** using these features
-2. **Evaluate** using PR-AUC (primary metric)
-3. **Monitor drift** between train and test distributions
-4. **Iterate** on features based on model performance
+**Best Model: XGBoost (Stratified Split)**
+- PR-AUC: 0.7815 (Test)
+- Recall: 97.31%
+- Precision: 52.87%
+- F1-Score: 0.6851
+
+**Key Findings:**
+- **Stratified splitting** significantly improves performance (XGBoost PR-AUC: 0.7359 → 0.7815)
+- **Chunk-aware label creation** ensures correct forward-looking volatility calculation
+- **10-feature set** provides good balance between information and model complexity
+- **Log returns** preferred over simple returns for crypto volatility modeling
+
+**Feature Importance (XGBoost):**
+- Top features: `log_return_std_60s`, `log_return_std_300s`, `return_range_60s`
+- Spread features (`spread_std_300s`, `spread_mean_60s`) contribute to model performance
+- Trade intensity (`tick_count_60s`) provides additional signal
+
+## 8. Next Steps & Future Enhancements
+
+1. ✅ **Train models** using these features - Complete
+2. ✅ **Evaluate** using PR-AUC (primary metric) - Complete
+3. ✅ **Monitor drift** between train and test distributions - Complete
+4. ✅ **Iterate** on features based on model performance - Complete
+5. **Future:** Explore additional features (order book depth, volume-weighted metrics)
+6. **Future:** Adaptive window sizes based on market regime
+7. **Future:** Multi-asset features for cross-market signals
 
 ---
 
-## Appendix: Feature Correlation
+## Appendix: Feature Correlation & Importance
 
 **Correlation with target variable (`volatility_spike`):**
 
-Top 3 features correlated with future volatility:
-1. `return_std_300s`: r = 0.1917 (strongest predictor)
-2. `return_mean_60s`: r = 0.0416
-3. `return_mean_300s`: r = 0.0357
+Top features correlated with future volatility:
+1. `log_return_std_60s`: Best separation (0.569 std dev between classes)
+2. `return_mean_60s`: Good separation (0.74 std dev)
+3. `return_min_30s`: Good separation (0.64 std dev), downside risk indicator
+4. `return_mean_300s`: Moderate separation (0.51 std dev)
+5. `tick_count_60s`: Moderate separation (0.21 std dev)
+
+**XGBoost Feature Importance:**
+- `log_return_std_60s`: Highest importance (60-second volatility is key predictor)
+- `log_return_std_300s`: High importance (longer-term context)
+- `return_range_60s`: High importance (derived feature captures volatility range)
+- Spread features: Moderate importance (market microstructure signals)
+- Trade intensity: Lower but non-zero importance
 
 **Interpretation:**
-- `return_std_300s` (5-minute volatility) shows the strongest positive correlation with future volatility spikes, confirming that recent volatility is a key indicator
-- Short-term return means show weaker but positive correlations
-- Spread features (`spread`, `spread_bps`) show minimal correlation with future volatility in this dataset
+- **Log return volatility** (especially 60s window) is the strongest predictor of future volatility spikes
+- **Return statistics** (mean, min) provide additional signal about price movement patterns
+- **Spread features** contribute to model performance, indicating market liquidity stress
+- **Derived features** (`return_range_60s`) effectively capture volatility proxies
+- **Multiple time windows** (30s, 60s, 300s) capture different aspects of market dynamics
+
+**Model Performance by Feature Set:**
+- **10-feature set:** XGBoost PR-AUC 0.7815 (best performance)
+- **Full feature set:** Higher multicollinearity, lower Logistic Regression performance
+- **Baseline (8 features):** Composite z-score approach, PR-AUC 0.2295 (stratified) to 0.2881 (time-based)

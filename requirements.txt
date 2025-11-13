@@ -14,6 +14,9 @@ sqlalchemy==2.0.23  # Required by MLflow
 
 # Evidently for drift monitoring
 evidently==0.4.11
+# Note: Evidently 0.4.11 requires pydantic>=2.0 for proper functionality
+# (despite version constraint warning, pydantic 2.x works correctly)
+pydantic>=2.0,<3.0
 
 # Visualization
 matplotlib==3.8.2

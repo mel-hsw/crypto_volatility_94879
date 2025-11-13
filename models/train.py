@@ -222,28 +222,34 @@ def plot_roc_curve(y_true: np.ndarray, y_proba: np.ndarray, save_path: Path):
 
 def train_baseline(train_df: pd.DataFrame, val_df: pd.DataFrame, test_df: pd.DataFrame, 
                    threshold: float = 2.0) -> Dict:
-    """Train baseline z-score model."""
+    """Train baseline z-score model using composite z-score across 8 features."""
     print("\n=== Training Baseline Model ===")
     
     X_train, y_train = prepare_features(train_df)
     X_val, y_val = prepare_features(val_df)
     X_test, y_test = prepare_features(test_df)
     
-    # Use only volatility feature for baseline
-    # Prefer log_return_std_60s (best separation), then fallback to others
-    volatility_col = None
-    for col_name in ['log_return_std_60s', 'log_return_std_30s', 'log_return_std_300s', 
-                     'return_std_60s', 'return_std_30s', 'price_volatility_5min', 'return_std_300s']:
-        if col_name in X_train.columns:
-            volatility_col = col_name
-            break
+    # Use all 8 features for composite z-score baseline
+    # These match BaselineVolatilityDetector.DEFAULT_FEATURES
+    baseline_features = BaselineVolatilityDetector.DEFAULT_FEATURES
     
-    if volatility_col is None:
-        raise ValueError("No volatility column found. Expected log_return_std_60s, log_return_std_30s, log_return_std_300s, return_std_60s, return_std_30s, return_std_300s, or price_volatility_5min")
+    # Filter to only include features that are available
+    available_features = [f for f in baseline_features if f in X_train.columns]
     
-    X_train_base = X_train[[volatility_col]]
-    X_val_base = X_val[[volatility_col]]
-    X_test_base = X_test[[volatility_col]]
+    if not available_features:
+        raise ValueError(f"None of the required baseline features found. "
+                        f"Expected: {baseline_features}. "
+                        f"Available: {X_train.columns.tolist()}")
+    
+    if len(available_features) < len(baseline_features):
+        missing = set(baseline_features) - set(available_features)
+        print(f"⚠ Warning: Some baseline features missing: {missing}")
+        print(f"   Using {len(available_features)} available features: {available_features}")
+    
+    # Select only the baseline features
+    X_train_base = X_train[available_features].copy()
+    X_val_base = X_val[available_features].copy()
+    X_test_base = X_test[available_features].copy()
     
     with mlflow.start_run(run_name="baseline_zscore") as run:
         # Log parameters
@@ -252,9 +258,11 @@ def train_baseline(train_df: pd.DataFrame, val_df: pd.DataFrame, test_df: pd.Dat
         mlflow.log_param("train_samples", len(train_df))
         mlflow.log_param("val_samples", len(val_df))
         mlflow.log_param("test_samples", len(test_df))
+        mlflow.log_param("features", available_features)
+        mlflow.log_param("feature_count", len(available_features))
         
-        # Train model
-        model = BaselineVolatilityDetector(threshold=threshold)
+        # Train model with specified features (uses composite z-score)
+        model = BaselineVolatilityDetector(threshold=threshold, feature_cols=available_features)
         model.fit(X_train_base, y_train)
         
         # Validation metrics
