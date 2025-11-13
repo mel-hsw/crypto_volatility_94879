@@ -54,6 +54,21 @@ def load_and_split_data(
         Tuple of (train_df, val_df, test_df)
     """
     df = pd.read_parquet(features_path)
+    
+    # Validate required columns
+    if 'timestamp' not in df.columns:
+        raise ValueError(f"Missing required column 'timestamp' in {features_path}. "
+                        f"Available columns: {df.columns.tolist()}")
+    
+    if 'volatility_spike' not in df.columns:
+        raise ValueError(
+            f"Missing required column 'volatility_spike' in {features_path}.\n"
+            f"Available columns: {df.columns.tolist()}\n\n"
+            f"This file appears to be unlabeled. Please add labels using:\n"
+            f"  python scripts/add_labels.py --features {features_path}\n\n"
+            f"Or use a labeled file (e.g., features_labeled.parquet)"
+        )
+    
     df = df.sort_values('timestamp').reset_index(drop=True)
     
     # Time-based split

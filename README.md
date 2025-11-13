@@ -60,7 +60,7 @@ This project builds a complete ML pipeline to detect short-term volatility spike
 ### Prerequisites
 
 - Docker Desktop installed and running
-- Python 3.9+ with pip
+- Python 3.9+ with pip (pyenv recommended for version management)
 - Git
 
 ### 1. Clone & Setup
@@ -68,6 +68,10 @@ This project builds a complete ML pipeline to detect short-term volatility spike
 ```bash
 git clone <repository-url>
 cd operationaliseai
+
+# Install Python 3.9 if using pyenv (optional)
+pyenv install 3.9.25
+pyenv local 3.9.25
 
 # Create virtual environment
 python3 -m venv .venv
