@@ -310,12 +310,30 @@ class FeaturePipeline:
                  bootstrap_servers: str = 'localhost:9092',
                  output_file: str = 'data/processed/features.parquet',
                  window_sizes: list = [30, 60, 300],
-                 create_kafka: bool = True):
-        """Initialize the feature pipeline."""
+                 create_kafka: bool = True,
+                 add_labels: bool = True,
+                 label_threshold_percentile: int = 90,
+                 label_gap_threshold_seconds: int = 300):
+        """Initialize the feature pipeline.
+        
+        Args:
+            input_topic: Kafka topic to consume from
+            output_topic: Kafka topic to publish to
+            bootstrap_servers: Kafka bootstrap servers
+            output_file: Path to output parquet file
+            window_sizes: List of window sizes in seconds for feature computation
+            create_kafka: Whether to create Kafka consumer/producer (False for tests)
+            add_labels: Whether to automatically add volatility_spike labels to output
+            label_threshold_percentile: Percentile to use as threshold for labels (default: 90)
+            label_gap_threshold_seconds: Time gap (seconds) that indicates a new data chunk (default: 300 = 5 min)
+        """
         
         self.input_topic = input_topic
         self.output_topic = output_topic
         self.output_file = output_file
+        self.add_labels = add_labels
+        self.label_threshold_percentile = label_threshold_percentile
+        self.label_gap_threshold_seconds = label_gap_threshold_seconds
         
         # Create output directory
         Path(output_file).parent.mkdir(parents=True, exist_ok=True)
@@ -353,6 +371,9 @@ class FeaturePipeline:
         logger.info(f"  Input topic: {input_topic}")
         logger.info(f"  Output topic: {output_topic}")
         logger.info(f"  Output file: {output_file}")
+        logger.info(f"  Add labels: {add_labels}")
+        if add_labels:
+            logger.info(f"  Label threshold: {label_threshold_percentile}th percentile")
     
     @staticmethod
     def _safe_json_deserializer(message_bytes):
@@ -426,8 +447,139 @@ class FeaturePipeline:
             logger.error(f"Error processing message: {e}")
             return None
     
-    def _write_batch(self):
-        """Write accumulated features to parquet file."""
+    @staticmethod
+    def _add_labels_to_dataframe(df: pd.DataFrame, threshold_percentile: int = 90, 
+                                  gap_threshold_seconds: int = 300) -> pd.DataFrame:
+        """
+        Add volatility_spike labels to a features dataframe.
+        
+        Computes forward-looking volatility (60-second horizon) and creates binary labels
+        based on a percentile threshold. Only calculates volatility within each data chunk
+        (separated by gaps larger than gap_threshold_seconds) to avoid incorrect cross-chunk
+        volatility calculations.
+        
+        Args:
+            df: Features dataframe (must have 'timestamp' and 'price' columns)
+            threshold_percentile: Percentile to use as threshold (default: 90)
+            gap_threshold_seconds: Time gap (seconds) that indicates a new data chunk (default: 300 = 5 min)
+            
+        Returns:
+            DataFrame with 'volatility_spike' column added
+        """
+        if 'volatility_spike' in df.columns:
+            logger.info("Dataframe already has 'volatility_spike' column, skipping label creation")
+            return df
+        
+        # Convert timestamp to datetime if needed
+        if not pd.api.types.is_datetime64_any_dtype(df['timestamp']):
+            df = df.copy()
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+        
+        # Sort by timestamp to ensure correct ordering
+        df = df.sort_values('timestamp').reset_index(drop=True)
+        
+        # Identify data chunks by detecting large gaps
+        df = df.copy()
+        df['time_diff'] = df['timestamp'].diff().dt.total_seconds()
+        df['chunk_id'] = (df['time_diff'] > gap_threshold_seconds).cumsum()
+        
+        num_chunks = df['chunk_id'].nunique()
+        logger.info(f"Detected {num_chunks} data chunk(s) (gaps > {gap_threshold_seconds}s indicate new chunk)")
+        
+        if num_chunks > 1:
+            chunk_sizes = df.groupby('chunk_id').size()
+            logger.info(f"Chunk sizes: {dict(chunk_sizes)}")
+        
+        # Compute forward-looking volatility (60-second horizon) within each chunk
+        HORIZON_SECONDS = 60
+        df['price_pct_change'] = df['price'].pct_change()
+        
+        # Initialize future_volatility column
+        df['future_volatility'] = np.nan
+        
+        # Process each chunk separately
+        all_valid_volatilities = []
+        
+        for chunk_id in df['chunk_id'].unique():
+            chunk_mask = df['chunk_id'] == chunk_id
+            chunk_df = df[chunk_mask].copy()
+            
+            if len(chunk_df) < 2:
+                logger.debug(f"Chunk {chunk_id} has < 2 rows, skipping")
+                continue
+            
+            # Estimate number of ticks in 60 seconds for this chunk
+            chunk_time_diff = (chunk_df['timestamp'].max() - chunk_df['timestamp'].min()).total_seconds()
+            if chunk_time_diff <= 0:
+                logger.debug(f"Chunk {chunk_id} has invalid time range, skipping")
+                continue
+                
+            ticks_per_second = len(chunk_df) / chunk_time_diff
+            window_size = max(1, int(ticks_per_second * HORIZON_SECONDS))
+            
+            logger.debug(f"Chunk {chunk_id}: {len(chunk_df)} rows, {ticks_per_second:.2f} ticks/sec, "
+                        f"window_size={window_size} ticks")
+            
+            # Compute forward-looking volatility within this chunk only
+            chunk_df['future_volatility'] = (
+                chunk_df['price_pct_change']
+                .shift(-window_size)
+                .rolling(window=window_size, min_periods=1)
+                .std()
+            )
+            
+            # Update the main dataframe with this chunk's volatility values
+            df.loc[chunk_mask, 'future_volatility'] = chunk_df['future_volatility'].values
+            
+            # Collect valid volatility values for threshold calculation
+            valid_volatilities = chunk_df['future_volatility'].dropna()
+            all_valid_volatilities.extend(valid_volatilities.tolist())
+        
+        # Drop NaN values at chunk boundaries and ends
+        df_clean = df.dropna(subset=['future_volatility']).copy()
+        
+        if len(df_clean) == 0:
+            logger.warning("No valid rows after computing future volatility, cannot add labels")
+            return df
+        
+        if len(all_valid_volatilities) == 0:
+            logger.warning("No valid volatility values computed, cannot add labels")
+            return df
+        
+        logger.info(f"After computing future volatility: {len(df_clean)} valid rows "
+                   f"(dropped {len(df) - len(df_clean)} rows)")
+        logger.info(f"Computed {len(all_valid_volatilities)} valid volatility values across {num_chunks} chunk(s)")
+        
+        # Calculate threshold using all valid volatility values (across all chunks)
+        THRESHOLD = np.percentile(all_valid_volatilities, threshold_percentile)
+        logger.info(f"Selected threshold: {THRESHOLD:.6f} ({threshold_percentile}th percentile)")
+        
+        # Create binary labels
+        df_clean['volatility_spike'] = (df_clean['future_volatility'] >= THRESHOLD).astype(int)
+        
+        # Class distribution
+        label_counts = df_clean['volatility_spike'].value_counts()
+        logger.info(f"Class distribution: "
+                   f"No Spike (0): {label_counts.get(0, 0)} ({label_counts.get(0, 0)/len(df_clean)*100:.1f}%), "
+                   f"Spike (1): {label_counts.get(1, 0)} ({label_counts.get(1, 0)/len(df_clean)*100:.1f}%)")
+        
+        # Drop temporary columns
+        df_clean = df_clean.drop(columns=['price_pct_change', 'future_volatility', 'time_diff', 'chunk_id'], 
+                                 errors='ignore')
+        
+        return df_clean
+    
+    def _write_batch(self, add_labels_final: bool = False):
+        """
+        Write accumulated features to parquet file.
+        
+        Note: This method only processes data from Kafka (streaming). It does NOT
+        read unprocessed data from files. It only writes newly computed features
+        from Kafka messages to the output parquet file.
+        
+        Args:
+            add_labels_final: If True, add labels to the complete dataset before writing
+        """
         if not self.features_batch:
             return
         
@@ -435,9 +587,47 @@ class FeaturePipeline:
             df = pd.DataFrame(self.features_batch)
             
             # Append to existing file or create new one
+            # NOTE: This appends Kafka-processed data to existing file.
+            # The featurizer ONLY processes data from Kafka, never reads from files.
             if Path(self.output_file).exists():
                 existing_df = pd.read_parquet(self.output_file)
-                df = pd.concat([existing_df, df], ignore_index=True)
+                
+                # Basic deduplication: remove rows with identical timestamp+product_id
+                # This prevents duplicates if the featurizer restarts and reprocesses Kafka messages
+                if 'timestamp' in existing_df.columns and 'product_id' in existing_df.columns:
+                    # Check for duplicates before appending
+                    existing_keys = set(zip(
+                        pd.to_datetime(existing_df['timestamp']),
+                        existing_df['product_id']
+                    ))
+                    new_keys = set(zip(
+                        pd.to_datetime(df['timestamp']),
+                        df['product_id']
+                    ))
+                    duplicates = new_keys & existing_keys
+                    
+                    if duplicates:
+                        logger.warning(f"Found {len(duplicates)} duplicate rows (same timestamp+product_id), skipping them")
+                        # Filter out duplicates from new data
+                        df['_key'] = list(zip(pd.to_datetime(df['timestamp']), df['product_id']))
+                        df = df[~df['_key'].isin(existing_keys)]
+                        df = df.drop(columns=['_key'])
+                
+                if len(df) > 0:
+                    df = pd.concat([existing_df, df], ignore_index=True)
+                else:
+                    logger.info("All new rows were duplicates, no new data to append")
+                    self.features_batch = []
+                    return
+            
+            # Add labels if requested (only on final write when we have complete data)
+            if add_labels_final and self.add_labels:
+                logger.info("Adding volatility_spike labels to complete dataset...")
+                df = self._add_labels_to_dataframe(
+                    df, 
+                    self.label_threshold_percentile,
+                    self.label_gap_threshold_seconds
+                )
             
             df.to_parquet(self.output_file, index=False)
             logger.info(f"Wrote {len(self.features_batch)} features to {self.output_file}")
@@ -472,14 +662,72 @@ class FeaturePipeline:
         except KeyboardInterrupt:
             logger.info("Shutting down gracefully...")
         finally:
-            # Write any remaining features
-            self._write_batch()
+            # Write any remaining features with labels if enabled
+            self._write_batch(add_labels_final=self.add_labels)
+            
+            # If labels weren't added during batch write, add them now to the complete file
+            if self.add_labels and Path(self.output_file).exists():
+                try:
+                    logger.info("Adding labels to final output file...")
+                    df = pd.read_parquet(self.output_file)
+                    if 'volatility_spike' not in df.columns:
+                        df_labeled = self._add_labels_to_dataframe(
+                            df, 
+                            self.label_threshold_percentile,
+                            self.label_gap_threshold_seconds
+                        )
+                        df_labeled.to_parquet(self.output_file, index=False)
+                        logger.info(f"✓ Labels added to {self.output_file}")
+                    else:
+                        logger.info("Labels already present in output file")
+                except Exception as e:
+                    logger.error(f"Error adding labels to final file: {e}")
+            
             self.consumer.close()
             self.producer.close()
             logger.info(f"Pipeline stopped.")
             logger.info(f"  Total messages seen: {message_count}")
             logger.info(f"  Successfully processed: {processed_count}")
             logger.info(f"  Skipped (invalid): {skipped_count}")
+
+
+def add_labels_to_file(features_path: str, output_path: str = None, threshold_percentile: int = 90,
+                       gap_threshold_seconds: int = 300):
+    """
+    Add volatility_spike labels to an existing features parquet file.
+    
+    This is a convenience function that can be used standalone or called from scripts.
+    Only calculates volatility within each data chunk (separated by gaps).
+    
+    Args:
+        features_path: Path to features parquet file (without labels)
+        output_path: Path to save labeled features (default: adds '_labeled' suffix)
+        threshold_percentile: Percentile to use as threshold (default: 90)
+        gap_threshold_seconds: Time gap (seconds) that indicates a new data chunk (default: 300 = 5 min)
+        
+    Returns:
+        Path to the output file with labels
+    """
+    logger.info(f"Loading features from {features_path}")
+    df = pd.read_parquet(features_path)
+    
+    logger.info(f"Loaded {len(df)} rows")
+    logger.info(f"Time range: {df['timestamp'].min()} to {df['timestamp'].max()}")
+    
+    # Add labels using the static method
+    df_labeled = FeaturePipeline._add_labels_to_dataframe(df, threshold_percentile, gap_threshold_seconds)
+    
+    # Determine output path
+    if output_path is None:
+        features_path_obj = Path(features_path)
+        output_path = features_path_obj.parent / f"{features_path_obj.stem}_labeled.parquet"
+    
+    # Save labeled features
+    df_labeled.to_parquet(output_path, index=False)
+    logger.info(f"✓ Saved labeled dataset to {output_path}")
+    logger.info(f"  Shape: {df_labeled.shape}")
+    
+    return str(output_path)
 
 
 def main():
@@ -490,6 +738,14 @@ def main():
     parser.add_argument('--output_file', default='data/processed/features.parquet', help='Output parquet file')
     parser.add_argument('--windows', nargs='+', type=int, default=[30, 60, 300], 
                         help='Window sizes in seconds')
+    parser.add_argument('--add-labels', action='store_true', default=True,
+                        help='Automatically add volatility_spike labels to output (default: True)')
+    parser.add_argument('--no-labels', dest='add_labels', action='store_false',
+                        help='Do not add labels to output')
+    parser.add_argument('--label-threshold-percentile', type=int, default=90,
+                        help='Percentile to use as threshold for volatility spike labels (default: 90)')
+    parser.add_argument('--label-gap-threshold-seconds', type=int, default=300,
+                        help='Time gap (seconds) that indicates a new data chunk for label calculation (default: 300 = 5 min)')
     
     args = parser.parse_args()
     
@@ -498,7 +754,10 @@ def main():
         output_topic=args.topic_out,
         bootstrap_servers=args.bootstrap_servers,
         output_file=args.output_file,
-        window_sizes=args.windows
+        window_sizes=args.windows,
+        add_labels=args.add_labels,
+        label_threshold_percentile=args.label_threshold_percentile,
+        label_gap_threshold_seconds=args.label_gap_threshold_seconds
     )
     
     pipeline.run()
