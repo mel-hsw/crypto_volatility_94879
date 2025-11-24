@@ -31,6 +31,7 @@ def check_api_available(api_base_url: str) -> bool:
     except Exception:
         return False
 
+
 # Sample feature data matching the expected format
 SAMPLE_FEATURES = {
     "log_return_300s": 0.001,
