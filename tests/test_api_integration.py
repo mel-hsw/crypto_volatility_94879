@@ -2,6 +2,7 @@
 Integration test for API endpoints.
 Tests the /predict endpoint with sample data.
 """
+
 import pytest
 import httpx
 import os
@@ -22,7 +23,7 @@ SAMPLE_FEATURES = {
     "price_velocity_300s": 0.0001,
     "realized_volatility_300s": 0.002,
     "order_book_imbalance_30s": 0.52,
-    "realized_volatility_60s": 0.0015
+    "realized_volatility_60s": 0.0015,
 }
 
 
@@ -61,8 +62,7 @@ async def test_predict_endpoint(api_base_url):
     """Test /predict endpoint with sample features."""
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.post(
-            f"{api_base_url}/predict",
-            json={"features": SAMPLE_FEATURES}
+            f"{api_base_url}/predict", json={"features": SAMPLE_FEATURES}
         )
         assert response.status_code == 200
         data = response.json()
@@ -86,5 +86,6 @@ async def test_metrics_endpoint(api_base_url):
         assert "text/plain" in response.headers.get("content-type", "")
         # Check for Prometheus metric format
         content = response.text
-        assert "http_requests_total" in content or "prediction_latency_seconds" in content
-
+        assert (
+            "http_requests_total" in content or "prediction_latency_seconds" in content
+        )
