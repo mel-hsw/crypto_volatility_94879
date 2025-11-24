@@ -32,11 +32,43 @@ jobs:
       run: |
         ruff check .
     
+    - name: Start API server
+      run: |
+        # Start API server in background
+        python -m uvicorn api.app:app --host 0.0.0.0 --port 8000 &
+        API_PID=$!
+        echo "API_PID=$API_PID" >> $GITHUB_ENV
+        
+        # Wait for API to be ready
+        echo "Waiting for API server to start..."
+        for i in {1..30}; do
+          if curl -f http://localhost:8000/health > /dev/null 2>&1; then
+            echo "✓ API server is ready!"
+            break
+          fi
+          if [ $i -eq 30 ]; then
+            echo "✗ API server failed to start"
+            exit 1
+          fi
+          sleep 1
+        done
+      env:
+        MODEL_PATH: models/artifacts/random_forest/model.pkl
+    
     - name: Run integration test
       run: |
         pytest tests/ -v
       env:
         MODEL_PATH: models/artifacts/random_forest/model.pkl
+    
+    - name: Stop API server
+      if: always()
+      run: |
+        if [ ! -z "$API_PID" ]; then
+          kill $API_PID || true
+        fi
+        # Also kill any remaining uvicorn processes
+        pkill -f "uvicorn api.app:app" || true
     
     - name: Run replay test (reproducibility)
       run: |
