@@ -2,6 +2,7 @@
 Load test script for API /predict endpoint.
 Sends 100 burst requests and measures latency metrics.
 """
+
 import asyncio
 import time
 import statistics
@@ -22,7 +23,7 @@ SAMPLE_FEATURES = {
     "price_velocity_300s": 0.0001,
     "realized_volatility_300s": 0.002,
     "order_book_imbalance_30s": 0.52,
-    "realized_volatility_60s": 0.0015
+    "realized_volatility_60s": 0.0015,
 }
 
 
@@ -31,18 +32,16 @@ async def send_request(client: httpx.AsyncClient, url: str, request_id: int) -> 
     start_time = time.time()
     try:
         response = await client.post(
-            url,
-            json={"features": SAMPLE_FEATURES},
-            timeout=10.0
+            url, json={"features": SAMPLE_FEATURES}, timeout=10.0
         )
         elapsed_ms = (time.time() - start_time) * 1000
-        
+
         return {
             "request_id": request_id,
             "status_code": response.status_code,
             "latency_ms": elapsed_ms,
             "success": 200 <= response.status_code < 300,
-            "error": None
+            "error": None,
         }
     except Exception as e:
         elapsed_ms = (time.time() - start_time) * 1000
@@ -51,48 +50,46 @@ async def send_request(client: httpx.AsyncClient, url: str, request_id: int) -> 
             "status_code": None,
             "latency_ms": elapsed_ms,
             "success": False,
-            "error": str(e)
+            "error": str(e),
         }
 
 
 async def run_load_test(
-    base_url: str,
-    num_requests: int = 100,
-    concurrent: int = 10
+    base_url: str, num_requests: int = 100, concurrent: int = 10
 ) -> Dict:
     """Run load test with burst requests."""
     url = f"{base_url}/predict"
     results: List[Dict] = []
-    
+
     print(f"Starting load test:")
     print(f"  URL: {url}")
     print(f"  Total requests: {num_requests}")
     print(f"  Concurrent requests: {concurrent}")
     print()
-    
+
     start_time = time.time()
-    
+
     async with httpx.AsyncClient() as client:
         # Create semaphore to limit concurrency
         semaphore = asyncio.Semaphore(concurrent)
-        
+
         async def bounded_request(request_id: int):
             async with semaphore:
                 return await send_request(client, url, request_id)
-        
+
         # Create all tasks
         tasks = [bounded_request(i) for i in range(num_requests)]
-        
+
         # Execute all requests concurrently (burst)
         results = await asyncio.gather(*tasks)
-    
+
     total_time = time.time() - start_time
-    
+
     # Calculate statistics
     latencies = [r["latency_ms"] for r in results]
     successful = [r for r in results if r["success"]]
     failed = [r for r in results if not r["success"]]
-    
+
     stats = {
         "total_requests": num_requests,
         "successful_requests": len(successful),
@@ -106,12 +103,20 @@ async def run_load_test(
             "mean": statistics.mean(latencies) if latencies else 0,
             "median": statistics.median(latencies) if latencies else 0,
             "p50": statistics.median(latencies) if latencies else 0,
-            "p95": statistics.quantiles(latencies, n=20)[18] if len(latencies) >= 20 else max(latencies) if latencies else 0,
-            "p99": statistics.quantiles(latencies, n=100)[98] if len(latencies) >= 100 else max(latencies) if latencies else 0,
+            "p95": (
+                statistics.quantiles(latencies, n=20)[18]
+                if len(latencies) >= 20
+                else max(latencies) if latencies else 0
+            ),
+            "p99": (
+                statistics.quantiles(latencies, n=100)[98]
+                if len(latencies) >= 100
+                else max(latencies) if latencies else 0
+            ),
         },
-        "errors": [r["error"] for r in failed if r["error"]]
+        "errors": [r["error"] for r in failed if r["error"]],
     }
-    
+
     return stats, results
 
 
@@ -121,7 +126,9 @@ def print_results(stats: Dict):
     print("LOAD TEST RESULTS")
     print("=" * 60)
     print(f"Total Requests:     {stats['total_requests']}")
-    print(f"Successful:          {stats['successful_requests']} ({stats['success_rate']:.1f}%)")
+    print(
+        f"Successful:          {stats['successful_requests']} ({stats['success_rate']:.1f}%)"
+    )
     print(f"Failed:               {stats['failed_requests']}")
     print(f"Total Time:           {stats['total_time_seconds']:.2f}s")
     print(f"Requests/Second:      {stats['requests_per_second']:.2f}")
@@ -134,75 +141,68 @@ def print_results(stats: Dict):
     print(f"  p99:                {stats['latency_ms']['p99']:.2f}")
     print(f"  Max:                {stats['latency_ms']['max']:.2f}")
     print()
-    
-    if stats['errors']:
+
+    if stats["errors"]:
         print("Errors:")
         error_counts = {}
-        for error in stats['errors']:
+        for error in stats["errors"]:
             error_counts[error] = error_counts.get(error, 0) + 1
         for error, count in error_counts.items():
             print(f"  {error}: {count}")
-    
+
     print("=" * 60)
-    
+
     # Check SLO compliance
-    p95_latency = stats['latency_ms']['p95']
+    p95_latency = stats["latency_ms"]["p95"]
     print()
     print("SLO Compliance:")
-    print(f"  p95 ≤ 800ms:        {'✓ PASS' if p95_latency <= 800 else '✗ FAIL'} ({p95_latency:.2f}ms)")
-    print(f"  Success Rate ≥ 99%: {'✓ PASS' if stats['success_rate'] >= 99 else '✗ FAIL'} ({stats['success_rate']:.1f}%)")
+    print(
+        f"  p95 ≤ 800ms:        {'✓ PASS' if p95_latency <= 800 else '✗ FAIL'} ({p95_latency:.2f}ms)"
+    )
+    print(
+        f"  Success Rate ≥ 99%: {'✓ PASS' if stats['success_rate'] >= 99 else '✗ FAIL'} ({stats['success_rate']:.1f}%)"
+    )
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Load test API /predict endpoint')
+    parser = argparse.ArgumentParser(description="Load test API /predict endpoint")
     parser.add_argument(
-        '--url',
-        type=str,
-        default='http://localhost:8000',
-        help='API base URL'
+        "--url", type=str, default="http://localhost:8000", help="API base URL"
     )
     parser.add_argument(
-        '--requests',
+        "--requests",
         type=int,
         default=100,
-        help='Number of requests to send (default: 100)'
+        help="Number of requests to send (default: 100)",
     )
     parser.add_argument(
-        '--concurrent',
+        "--concurrent",
         type=int,
         default=10,
-        help='Number of concurrent requests (default: 10)'
+        help="Number of concurrent requests (default: 10)",
     )
     parser.add_argument(
-        '--output',
-        type=str,
-        help='Output JSON file for detailed results'
+        "--output", type=str, help="Output JSON file for detailed results"
     )
-    
+
     args = parser.parse_args()
-    
+
     # Run load test
-    stats, results = asyncio.run(run_load_test(
-        args.url,
-        args.requests,
-        args.concurrent
-    ))
-    
+    stats, results = asyncio.run(
+        run_load_test(args.url, args.requests, args.concurrent)
+    )
+
     # Print results
     print_results(stats)
-    
+
     # Save detailed results if requested
     if args.output:
         output_path = Path(args.output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, 'w') as f:
-            json.dump({
-                "summary": stats,
-                "results": results
-            }, f, indent=2)
+        with open(output_path, "w") as f:
+            json.dump({"summary": stats, "results": results}, f, indent=2)
         print(f"\nDetailed results saved to: {output_path}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
-

@@ -40,6 +40,7 @@ reportlab==4.0.7  # Alternative if needed
 # Testing (optional but recommended)
 pytest==7.4.3
 pytest-cov==4.1.0
+pytest-asyncio>=0.21.0  # Required for async test support
 httpx==0.25.2  # For integration tests
 
 # Code formatting and linting (CI/CD)
