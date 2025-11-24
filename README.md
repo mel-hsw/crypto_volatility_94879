@@ -187,7 +187,7 @@ docker compose ps
 - MLflow: http://localhost:5001
 - API: http://localhost:8000
 - Prometheus: http://localhost:9090
-- Grafana: http://localhost:3000 (admin/gafanap4ssw0rd)
+- Grafana: http://localhost:3000 (credentials: see `.env` file or use defaults from `docker/compose.yaml`)
 
 ### 3. Create Kafka Topics
 
