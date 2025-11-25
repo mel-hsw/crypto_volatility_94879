@@ -32,10 +32,10 @@
                              │
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    MESSAGE BROKER (Kafka KRaft)                  │
+│                    MESSAGE BROKER (Kafka + Zookeeper)           │
 │                                                                   │
 │  ┌──────────────────────────────────────────────────────────┐   │
-│  │         Kafka Broker (KRaft Mode)                       │   │
+│  │         Kafka Broker (Zookeeper Mode)                   │   │
 │  │         Port: 9092                                        │   │
 │  │                                                           │   │
 │  │  Topics:                                                 │   │
@@ -111,12 +111,12 @@
 - **Optional**: Saves raw data to `data/raw/*.ndjson`
 
 ### 2. Message Broker
-- **Component**: Kafka (KRaft mode)
+- **Component**: Kafka (Zookeeper mode)
 - **Port**: 9092
 - **Topics**:
   - `ticks.raw`: Raw ticker data from Coinbase
   - `ticks.features`: Computed features ready for prediction
-- **Mode**: KRaft (no Zookeeper needed)
+- **Mode**: Zookeeper mode (traditional, stable)
 
 ### 3. Feature Engineering
 - **Component**: `features/featurizer.py`
@@ -158,7 +158,10 @@ docker compose up -d
 ```
 
 Services:
-- `kafka-kraft`: Kafka broker
+- `zookeeper`: Zookeeper coordination service
+- `kafka`: Kafka broker
 - `mlflow-server`: MLflow tracking server
 - `volatility-api`: FastAPI prediction service
+- `prometheus`: Prometheus metrics collection
+- `grafana`: Grafana visualization dashboard
 

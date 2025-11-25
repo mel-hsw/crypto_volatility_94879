@@ -1,5 +1,4 @@
 # Default compose file - uses Zookeeper mode (stable, well-tested)
-# For KRaft mode, use: docker compose -f compose-kraft.yaml up -d
 
 services:
   zookeeper:
@@ -132,6 +131,6 @@ volumes:
   prometheus-data:
   grafana-data:
 
-# Note: Kafka is now running in KRaft mode (no Zookeeper needed)
+# Note: Kafka is running in Zookeeper mode (traditional, stable)
 # MLflow data is stored in ./mlflow_data (bind mount)
 # API service loads models from ../models (read-only mount)

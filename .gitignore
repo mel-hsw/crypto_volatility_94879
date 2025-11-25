@@ -26,3 +26,7 @@ __pycache__/
 
 # OS
 .DS_Store
+
+# Testing & Linting
+.pytest_cache/
+.ruff_cache/

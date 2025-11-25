@@ -76,20 +76,22 @@ def replay_to_kafka(
 
                     # Calculate delay based on timestamps (if available)
                     current_timestamp_str = tick.get("timestamp", tick.get("time"))
-                    
+
                     # Only process timestamp delay if we have both current and last timestamps
                     if current_timestamp_str and last_timestamp:
                         try:
                             # Handle various timestamp formats
-                            current_ts_str = current_timestamp_str.replace("Z", "+00:00")
+                            current_ts_str = current_timestamp_str.replace(
+                                "Z", "+00:00"
+                            )
                             last_ts_str = last_timestamp.replace("Z", "+00:00")
-                            
+
                             current_ts = datetime.fromisoformat(current_ts_str)
                             last_ts = datetime.fromisoformat(last_ts_str)
 
                             # Calculate real delay (handle both forward and backward time jumps)
                             real_delay = (current_ts - last_ts).total_seconds()
-                            
+
                             # Adjust by speed multiplier
                             delay = max(0, real_delay / speed_multiplier)
 

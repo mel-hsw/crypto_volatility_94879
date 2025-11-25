@@ -295,16 +295,17 @@ def main():
 
     # Sort ticks by timestamp (important for gap detection and label creation)
     try:
+
         def get_timestamp(tick):
             """Extract timestamp from tick, handling missing values gracefully."""
             ts_str = tick.get("timestamp") or tick.get("time")
             if ts_str:
                 try:
-                    return pd.to_datetime(ts_str, errors='coerce')
+                    return pd.to_datetime(ts_str, errors="coerce")
                 except Exception:
                     return pd.NaT
             return pd.NaT
-        
+
         # Sort ticks by timestamp, filtering out invalid timestamps
         valid_ticks = []
         invalid_ticks = []
@@ -314,14 +315,16 @@ def main():
                 valid_ticks.append((ts, tick))
             else:
                 invalid_ticks.append(tick)
-        
+
         if invalid_ticks:
-            logger.warning(f"Skipping {len(invalid_ticks)} ticks with invalid timestamps")
-        
+            logger.warning(
+                f"Skipping {len(invalid_ticks)} ticks with invalid timestamps"
+            )
+
         # Sort valid ticks by timestamp
         valid_ticks.sort(key=lambda x: x[0])
         ticks = [tick for _, tick in valid_ticks]
-        
+
         logger.info(f"Sorted {len(ticks)} ticks by timestamp")
     except Exception as e:
         logger.warning(f"Could not sort ticks by timestamp: {e}")

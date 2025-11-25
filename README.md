@@ -24,7 +24,6 @@ This project builds a complete ML pipeline to detect short-term volatility spike
 │ └── app.py # Main API endpoints (/predict, /health, /version, /metrics)
 ├── docker/ # Docker configuration
 │ ├── compose.yaml # Main Docker Compose (Kafka, Zookeeper, MLflow, API, Prometheus, Grafana)
-│ ├── compose-kraft.yaml # Kafka KRaft mode (alternative)
 │ ├── Dockerfile.api # API service containerization
 │ ├── Dockerfile.ingestor # Data ingestion containerization
 │ ├── grafana/
@@ -41,16 +40,12 @@ This project builds a complete ML pipeline to detect short-term volatility spike
 │ ├── ws_ingest.py # WebSocket data ingestion → Kafka
 │ ├── replay.py # Reproducibility verification (offline feature generation)
 │ ├── replay_to_kafka.py # Replay NDJSON to Kafka (E2E testing)
-│ ├── consolidate_data.py # Consolidate feature files & create stratified splits
-│ ├── feature_analysis.py # Feature engineering & selection analysis
 │ ├── generate_evidently_report.py # Data drift monitoring reports
 │ ├── generate_eval_report.py # Model evaluation PDF generation
 │ ├── load_test.py # API load testing script
-│ ├── add_labels.py # Add volatility spike labels to features
 │ ├── kafka_consume_check.py # Stream validation
 │ ├── run_e2e_simple.sh # Simplified end-to-end test (ingestion + API)
-│ ├── run_e2e_test.sh # Full end-to-end pipeline test
-│ └── retrain_all_models.sh # Retrain all models script
+│ └── run_e2e_test.sh # Full end-to-end pipeline test
 ├── features/ # Feature engineering
 │ └── featurizer.py # Real-time feature computation (FeatureComputer, FeaturePipeline)
 ├── models/ # Model training & inference
@@ -307,22 +302,19 @@ python scripts/generate_evidently_report.py \
 open reports/evidently/data_drift_report.html
 ```
 
-**Consolidate all available data for better performance:**
+**Train with existing consolidated data (if available):**
 
 ```bash
-# Consolidate all feature files and create balanced splits
-python scripts/consolidate_data.py --splits
-
-# This creates:
-# - data/processed/features_consolidated.parquet (all data)
-# - data/processed/features_consolidated_train.parquet
-# - data/processed/features_consolidated_val.parquet
-# - data/processed/features_consolidated_test.parquet
-
-# Train with consolidated data and stratified splits (recommended)
+# If you have consolidated feature files already created, train with stratified splits (recommended)
 python models/train.py \
   --features data/processed/features_consolidated.parquet \
   --split-method stratified \
+  --models random_forest
+
+# Or train with single feature file using time-based split
+python models/train.py \
+  --features data/processed/features_replay.parquet \
+  --split-method time_based \
   --models random_forest
 ```
 
@@ -701,7 +693,7 @@ Consider implementing:
 
 **Core:**
 - Python 3.9+
-- Apache Kafka (KRaft mode)
+- Apache Kafka (Zookeeper mode)
 - MLflow 2.10.2
 - Docker Compose
 
