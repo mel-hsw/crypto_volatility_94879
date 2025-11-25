@@ -46,14 +46,14 @@ This checklist guides you through the final steps to ensure your project is comp
 ## ✅ Week 7 Deliverables (Complete)
 
 - [x] `docs/runbook.md` - Complete runbook (startup, troubleshooting, recovery)
-- [x] `docs/performance_summary.md` - Performance metrics summary
+- [x] `docs/latency_report.md` - Latency metrics summary
 - [x] `docs/demo_checklist.md` - Demo script and checklist
 
 ---
 
 ## 📋 Final Steps Before Submission
 
-### 1. Update Performance Summary
+### 1. Update Latency Report
 
 - [x] Fill in actual load test results
 - [x] Add latency metrics
@@ -64,7 +64,7 @@ This checklist guides you through the final steps to ensure your project is comp
 ```bash
 # Check MLflow for model metrics
 # Visit http://localhost:5001
-# Update docs/performance_summary.md with actual PR-AUC values
+# Update docs/latency_report.md with actual PR-AUC values
 ```
 
 ---
@@ -100,10 +100,10 @@ curl -X POST http://localhost:8000/predict \
 ### 3. Documentation Review
 
 - [x] README has ≤10-line quick start at top
-- [x] All required docs exist (slo.md, runbook.md, performance_summary.md, etc.)
+- [x] All required docs exist (slo.md, runbook.md, latency_report.md, etc.)
 - [x] Architecture diagram exists
-- [x] Performance summary has load test results
-- [x] Performance summary has model PR-AUC values
+- [x] Latency report has load test results
+- [x] Latency report has model PR-AUC values
 - [ ] Review all docs for completeness and accuracy
 
 ---
@@ -130,7 +130,7 @@ git status
 git add .
 
 # Commit with descriptive message
-git commit -m "Complete weeks 5-7: CI/CD, monitoring, SLOs, runbook, performance summary"
+git commit -m "Complete weeks 5-7: CI/CD, monitoring, SLOs, runbook, latency report"
 
 # Create release tag
 git tag v1.0.0

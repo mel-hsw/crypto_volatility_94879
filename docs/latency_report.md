@@ -1,4 +1,4 @@
-# Performance Summary
+# Latency Report
 
 ## Overview
 

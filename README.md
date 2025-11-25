@@ -81,7 +81,7 @@ This project builds a complete ML pipeline to detect short-term volatility spike
 │ ├── feature_spec.md # Feature specification (v1.2)
 │ ├── model_card_v1.md # Model card documentation
 │ ├── selection_rationale.md # Model selection rationale
-│ ├── performance_summary.md # Performance metrics & SLO compliance
+│ ├── latency_report.md # Latency metrics & SLO compliance
 │ ├── runbook.md # Operations runbook (startup, troubleshooting, recovery)
 │ ├── slo.md # Service Level Objectives
 │ ├── drift_summary.md # Data drift monitoring strategy
