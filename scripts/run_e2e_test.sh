@@ -50,16 +50,30 @@ echo -e "${GREEN}✓ Prometheus is healthy${NC}"
 
 # Check Kafka topics exist
 echo -e "${YELLOW}Step 2: Checking Kafka topics...${NC}"
-if ! docker exec kafka kafka-topics --list --bootstrap-server localhost:9092 | grep -q "ticks.raw"; then
+
+# Try to find the correct kafka-topics command path
+KAFKA_TOPICS_CMD="kafka-topics"
+if ! docker exec kafka which kafka-topics >/dev/null 2>&1; then
+    # Try alternative paths for Confluent Platform images
+    if docker exec kafka test -f /usr/bin/kafka-topics; then
+        KAFKA_TOPICS_CMD="/usr/bin/kafka-topics"
+    elif docker exec kafka test -f /usr/bin/kafka-topics.sh; then
+        KAFKA_TOPICS_CMD="/usr/bin/kafka-topics.sh"
+    else
+        echo -e "${YELLOW}Warning: kafka-topics command not found in standard locations. Trying default...${NC}"
+    fi
+fi
+
+if ! docker exec kafka $KAFKA_TOPICS_CMD --list --bootstrap-server localhost:9092 2>/dev/null | grep -q "ticks.raw"; then
     echo -e "${YELLOW}Creating Kafka topics...${NC}"
-    docker exec kafka kafka-topics --create \
+    docker exec kafka $KAFKA_TOPICS_CMD --create \
         --topic ticks.raw \
         --bootstrap-server localhost:9092 \
         --partitions 3 \
         --replication-factor 1 \
         --if-not-exists 2>/dev/null || true
     
-    docker exec kafka kafka-topics --create \
+    docker exec kafka $KAFKA_TOPICS_CMD --create \
         --topic ticks.features \
         --bootstrap-server localhost:9092 \
         --partitions 3 \

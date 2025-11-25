@@ -143,8 +143,16 @@ docker exec volatility-api env | grep MODEL_PATH
 # Check Kafka is running
 docker compose ps kafka
 
-# Test Kafka connectivity
-docker exec -it kafka kafka-topics --list --bootstrap-server localhost:9092
+# Test Kafka connectivity (try to find correct command path)
+KAFKA_CMD="kafka-topics"
+if ! docker exec kafka which kafka-topics >/dev/null 2>&1; then
+    if docker exec kafka test -f /usr/bin/kafka-topics; then
+        KAFKA_CMD="/usr/bin/kafka-topics"
+    elif docker exec kafka test -f /usr/bin/kafka-topics.sh; then
+        KAFKA_CMD="/usr/bin/kafka-topics.sh"
+    fi
+fi
+docker exec -it kafka $KAFKA_CMD --list --bootstrap-server localhost:9092
 
 # Check network connectivity
 docker exec volatility-api ping kafka
@@ -284,8 +292,8 @@ docker compose restart kafka
 # Wait for Kafka to be ready
 sleep 20
 
-# Verify topics exist
-docker exec -it kafka kafka-topics --list --bootstrap-server localhost:9092
+# Verify topics exist (using detected command path)
+docker exec -it kafka $KAFKA_CMD --list --bootstrap-server localhost:9092
 
 # Restart dependent services
 docker compose restart api

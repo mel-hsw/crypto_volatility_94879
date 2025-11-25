@@ -14,7 +14,9 @@ numpy>=1.26.2
 pyarrow==14.0.1
 
 # ML and modeling
-scikit-learn>=1.4.0
+# Pin to same version as requirements.txt to ensure model compatibility
+# Models are trained with scikit-learn==1.3.2, so API must use same version
+scikit-learn==1.3.2
 xgboost==2.0.3
 
 # MLflow for experiment tracking (optional for API)

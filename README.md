@@ -192,21 +192,34 @@ docker compose ps
 ### 3. Create Kafka Topics
 
 ```bash
-# For Docker container names like kafka
-docker exec -it kafka kafka-topics --create \
+# For Docker container names like kafka (Confluent Platform 7.x)
+# Try to find the correct kafka-topics command
+KAFKA_CMD="kafka-topics"
+if ! docker exec kafka which kafka-topics >/dev/null 2>&1; then
+    if docker exec kafka test -f /usr/bin/kafka-topics; then
+        KAFKA_CMD="/usr/bin/kafka-topics"
+    elif docker exec kafka test -f /usr/bin/kafka-topics.sh; then
+        KAFKA_CMD="/usr/bin/kafka-topics.sh"
+    fi
+fi
+
+# Create topics
+docker exec -it kafka $KAFKA_CMD --create \
   --topic ticks.raw \
   --bootstrap-server localhost:9092 \
   --partitions 3 \
-  --replication-factor 1
+  --replication-factor 1 \
+  --if-not-exists
 
-docker exec -it kafka kafka-topics --create \
+docker exec -it kafka $KAFKA_CMD --create \
   --topic ticks.features \
   --bootstrap-server localhost:9092 \
   --partitions 3 \
-  --replication-factor 1
+  --replication-factor 1 \
+  --if-not-exists
 
 # Verify
-docker exec -it kafka kafka-topics --list --bootstrap-server localhost:9092
+docker exec -it kafka $KAFKA_CMD --list --bootstrap-server localhost:9092
 ```
 
 ### 4. Configure Hostname Resolution (for local execution)
@@ -693,7 +706,7 @@ Consider implementing:
 - Docker Compose
 
 **ML & Analysis:**
-- scikit-learn >=1.4.0
+- scikit-learn 1.3.2
 - XGBoost 2.0.3
 - pandas, NumPy
 - Evidently >=0.4.40,<0.5.0

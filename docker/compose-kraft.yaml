@@ -66,6 +66,7 @@ services:
     environment:
       - MODEL_VERSION=random_forest
       - MODEL_PATH=/app/models/artifacts/random_forest/model.pkl
+      - MODEL_VARIANT=ml
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
     volumes:
       - ../models:/app/models:ro

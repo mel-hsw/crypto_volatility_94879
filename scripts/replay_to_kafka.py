@@ -76,27 +76,40 @@ def replay_to_kafka(
 
                     # Calculate delay based on timestamps (if available)
                     current_timestamp_str = tick.get("timestamp", tick.get("time"))
+                    
+                    # Only process timestamp delay if we have both current and last timestamps
                     if current_timestamp_str and last_timestamp:
                         try:
-                            current_ts = datetime.fromisoformat(
-                                current_timestamp_str.replace("Z", "+00:00")
-                            )
-                            last_ts = datetime.fromisoformat(
-                                last_timestamp.replace("Z", "+00:00")
-                            )
+                            # Handle various timestamp formats
+                            current_ts_str = current_timestamp_str.replace("Z", "+00:00")
+                            last_ts_str = last_timestamp.replace("Z", "+00:00")
+                            
+                            current_ts = datetime.fromisoformat(current_ts_str)
+                            last_ts = datetime.fromisoformat(last_ts_str)
 
-                            # Calculate real delay
+                            # Calculate real delay (handle both forward and backward time jumps)
                             real_delay = (current_ts - last_ts).total_seconds()
+                            
                             # Adjust by speed multiplier
                             delay = max(0, real_delay / speed_multiplier)
 
                             if delay > 0:
                                 time.sleep(delay)
-                        except (ValueError, TypeError):
+                            elif real_delay < 0:
+                                # Log warning for backward time jumps but continue
+                                logger.warning(
+                                    f"Backward timestamp jump detected: {real_delay:.2f}s "
+                                    f"(line {line_num}). Continuing without delay."
+                                )
+                        except (ValueError, TypeError) as e:
                             # If timestamp parsing fails, use small fixed delay
+                            logger.warning(
+                                f"Failed to parse timestamp on line {line_num}: {e}. "
+                                "Using fixed delay."
+                            )
                             time.sleep(0.01 / speed_multiplier)
                     else:
-                        # No timestamp, use small fixed delay
+                        # No timestamp or first message, use small fixed delay
                         time.sleep(0.01 / speed_multiplier)
 
                     # Send to Kafka
@@ -104,7 +117,9 @@ def replay_to_kafka(
                     future.get(timeout=10)  # Wait for confirmation
 
                     message_count += 1
-                    last_timestamp = current_timestamp_str
+                    # Only update last_timestamp if we have a valid current timestamp
+                    if current_timestamp_str:
+                        last_timestamp = current_timestamp_str
 
                     if message_count % 100 == 0:
                         logger.info(f"Sent {message_count} messages...")
